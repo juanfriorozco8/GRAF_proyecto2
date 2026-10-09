@@ -1,9 +1,11 @@
 mod geometry;
 mod image;
+mod interactive;
 mod material;
 mod math;
 mod renderer;
 mod scene;
+mod showcase;
 
 use std::env;
 use std::error::Error;
@@ -18,6 +20,8 @@ enum Command {
     Preview,
     Render,
     Animate,
+    Showcase,
+    Interactive,
 }
 
 #[derive(Debug)]
@@ -45,7 +49,8 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     match options.command {
         Command::Preview | Command::Render => render_still(&world, &options)?,
-        Command::Animate => render_animation(&world, &options)?,
+        Command::Animate | Command::Showcase => render_animation(&world, &options)?,
+        Command::Interactive => render_interactive(&world, &options)?,
     }
     println!("Proceso completado en {:.2?}", started.elapsed());
     Ok(())
@@ -68,12 +73,36 @@ fn render_still(world: &World, options: &Options) -> Result<(), Box<dyn Error>> 
     Ok(())
 }
 
+fn render_interactive(world: &World, options: &Options) -> Result<(), Box<dyn Error>> {
+    interactive::serve(
+        world,
+        interactive::InteractiveConfig {
+            width: options.width,
+            height: options.height,
+            samples_per_pixel: options.samples,
+            max_depth: options.depth,
+            threads: options.threads,
+            seed: options.seed,
+        },
+    )?;
+    Ok(())
+}
+
 fn render_animation(world: &World, options: &Options) -> Result<(), Box<dyn Error>> {
     std::fs::create_dir_all(&options.output)?;
     let config = render_config(options);
     for frame in 0..options.frames {
         let progress = frame as f32 / options.frames as f32;
-        let camera = Camera::orbit(progress, options.width, options.height);
+        let camera = if options.command == Command::Showcase {
+            showcase::camera_at(
+                world,
+                progress * showcase::DURATION_SECONDS,
+                options.width,
+                options.height,
+            )
+        } else {
+            Camera::orbit(progress, options.width, options.height)
+        };
         // El mismo patrón de subpíxel en todos los cuadros evita ruido temporal y parpadeo.
         let (image, stats) = render(world, camera, config, options.seed);
         let path = options.output.join(format!("frame_{frame:04}.bmp"));
@@ -116,6 +145,8 @@ fn parse_options() -> Result<Options, Box<dyn Error>> {
         "preview" => Command::Preview,
         "render" => Command::Render,
         "animate" => Command::Animate,
+        "showcase" => Command::Showcase,
+        "interactive" | "view" => Command::Interactive,
         unknown => return Err(format!("comando desconocido: {unknown}. Use --help.").into()),
     };
 
@@ -124,6 +155,15 @@ fn parse_options() -> Result<Options, Box<dyn Error>> {
         Command::Preview => (480, 270, 2, 4, 1, PathBuf::from("renders/preview.bmp")),
         Command::Render => (1920, 1080, 16, 7, 1, PathBuf::from("renders/final.bmp")),
         Command::Animate => (960, 540, 3, 6, 360, PathBuf::from("renders/frames")),
+        Command::Showcase => (
+            1280,
+            720,
+            4,
+            8,
+            864,
+            PathBuf::from("renders/showcase-frames"),
+        ),
+        Command::Interactive => (1200, 675, 4, 6, 1, PathBuf::new()),
     };
     let mut threads = available_threads;
     let mut seed = 20_261_004_u32;
@@ -181,11 +221,13 @@ fn print_help() {
     println!(
         "\
 Raytracer CPU del diorama The End (sin dependencias externas)\n\n\
-USO:\n  cargo run --release -- <preview|render|animate> [opciones]\n\n\
+USO:\n  cargo run --release -- <preview|render|animate|showcase|interactive> [opciones]\n\n\
 COMANDOS:\n\
   preview       genera una vista previa BMP\n\
   render        genera la imagen final BMP\n\
   animate       genera los fotogramas de la órbita\n\
+  showcase      genera la entrega de 36 s a 24 FPS con acercamientos\n\
+  interactive   abre el visor manual en http://127.0.0.1:7878\n\n\
 OPCIONES:\n\
   --width N      ancho en píxeles\n\
   --height N     alto en píxeles\n\
