@@ -1,6 +1,7 @@
 /target/
 /renders/*
 !/renders/diorama.mp4
+!/renders/diorama.gif
 *.bmp
 *.ppm
 .DS_Store
